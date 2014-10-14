@@ -71,6 +71,7 @@ import (
 	"os"
 	"runtime"
 	"sort"
+	"syscall"
 )
 
 const (
@@ -108,6 +109,10 @@ func Open(file string) *Index {
 	ix.numName = int((ix.postIndex-ix.nameIndex)/4) - 1
 	ix.numPost = int((n - ix.postIndex) / postEntrySize)
 	return ix
+}
+
+func (ix *Index) Close() error {
+	return ix.data.close()
 }
 
 // slice returns the slice of index data starting at the given byte offset.
@@ -414,6 +419,15 @@ func corrupt() {
 type mmapData struct {
 	f *os.File
 	d []byte
+	o []byte
+}
+
+func (m *mmapData) close() error {
+	return nil
+	if err := syscall.Munmap(m.o); err != nil {
+		return err
+	}
+	return m.f.Close()
 }
 
 // mmap maps the given file into memory.
