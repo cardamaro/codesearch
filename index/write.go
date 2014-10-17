@@ -10,6 +10,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"syscall"
 	"unsafe"
 
 	"github.com/cardamaro/codesearch/sparse"
@@ -49,13 +50,14 @@ type IndexWriter struct {
 
 	post      []postEntry // list of (trigram, file#) pairs
 	postFile  []*os.File  // flushed post entries
+	postData  [][]byte    // mmap buffers to be unmapped
 	postIndex *bufWriter  // temp file holding posting list index
 
 	inbuf []byte     // input buffer
 	main  *bufWriter // main index file
 }
 
-const npost = 64 << 20 / 8 // 64 MB worth of post entries
+const npost = 1 << 20 // 1 MB worth of post entries
 
 // Create returns a new IndexWriter that will write the index to file.
 func Create(file string) *IndexWriter {
@@ -218,7 +220,11 @@ func (ix *IndexWriter) Flush() {
 	ix.main.writeString(trailerMagic)
 
 	os.Remove(ix.nameData.name)
+	for _, d := range ix.postData {
+		syscall.Munmap(d)
+	}
 	for _, f := range ix.postFile {
+		f.Close()
 		os.Remove(f.Name())
 	}
 	os.Remove(ix.nameIndex.name)
@@ -286,7 +292,9 @@ func (ix *IndexWriter) mergePost(out *bufWriter) {
 
 	log.Printf("merge %d files + mem", len(ix.postFile))
 	for _, f := range ix.postFile {
-		h.addFile(f)
+		ix.postData = append(
+			ix.postData,
+			h.addFile(f))
 	}
 	sortPost(ix.post)
 	h.addMem(ix.post)
@@ -338,10 +346,11 @@ type postHeap struct {
 	ch []*postChunk
 }
 
-func (h *postHeap) addFile(f *os.File) {
+func (h *postHeap) addFile(f *os.File) []byte {
 	data := mmapFile(f).d
 	m := (*[npost]postEntry)(unsafe.Pointer(&data[0]))[:len(data)/8]
 	h.addMem(m)
+	return data
 }
 
 func (h *postHeap) addMem(x []postEntry) {
@@ -598,13 +607,16 @@ func validUTF8(c1, c2 uint32) bool {
 // 24 bits to sort.  Run two rounds of 12-bit radix sort.
 const sortK = 12
 
-var sortTmp []postEntry
-var sortN [1 << sortK]int
-
+// TODO(knorton): sortTmp and sortN were previously static state
+// presumably to avoid allocations of the large buffers. Sadly,
+// this makes it impossible for us to run concurrent indexers.
+// I have moved them into local allocations but if we really do
+// need to share a buffer, they can easily go into a reusable
+// object, similar to the way buffers are reused in grepper.
 func sortPost(post []postEntry) {
-	if len(post) > len(sortTmp) {
-		sortTmp = make([]postEntry, len(post))
-	}
+	var sortN [1 << sortK]int
+
+	sortTmp := make([]postEntry, len(post))
 	tmp := sortTmp[:len(post)]
 
 	const k = sortK
