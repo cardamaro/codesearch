@@ -8,13 +8,13 @@ package index
 //
 // An index stored on disk has the format:
 //
-//	"csearch index 1\n"
-//	list of paths
-//	list of names
-//	list of posting lists
-//	name index
-//	posting list index
-//	trailer
+//  "csearch index 1\n"
+//  list of paths
+//  list of names
+//  list of posting lists
+//  name index
+//  posting list index
+//  trailer
 //
 // The list of paths is a sorted sequence of NUL-terminated file or directory names.
 // The index covers the file trees rooted at those paths.
@@ -28,8 +28,8 @@ package index
 // The list of posting lists are a sequence of posting lists.
 // Each posting list has the form:
 //
-//	trigram [3]
-//	deltas [v]...
+//  trigram [3]
+//  deltas [v]...
 //
 // The trigram gives the 3 byte trigram that this list describes.  The
 // delta list is a sequence of varint-encoded deltas between file
@@ -45,9 +45,9 @@ package index
 // index is a sequence of index entries describing each successive
 // posting list.  Each index entry has the form:
 //
-//	trigram [3]
-//	file count [4]
-//	offset [4]
+//  trigram [3]
+//  file count [4]
+//  offset [4]
 //
 // Index entries are only written for the non-empty posting lists,
 // so finding the posting list for a specific trigram requires a
@@ -57,12 +57,12 @@ package index
 //
 // The trailer has the form:
 //
-//	offset of path list [4]
-//	offset of name list [4]
-//	offset of posting lists [4]
-//	offset of name index [4]
-//	offset of posting list index [4]
-//	"\ncsearch trailr\n"
+//  offset of path list [4]
+//  offset of name list [4]
+//  offset of posting lists [4]
+//  offset of name index [4]
+//  offset of posting list index [4]
+//  "\ncsearch trailr\n"
 
 import (
 	"bytes"
@@ -97,7 +97,7 @@ const postEntrySize = 3 + 4 + 4
 func Open(file string) *Index {
 	mm := mmap(file)
 	if len(mm.d) < 4*4+len(trailerMagic) || string(mm.d[len(mm.d)-len(trailerMagic):]) != trailerMagic {
-		corrupt()
+		corrupt(mm.f)
 	}
 	n := uint32(len(mm.d) - len(trailerMagic) - 5*4)
 	ix := &Index{data: mm}
@@ -111,16 +111,12 @@ func Open(file string) *Index {
 	return ix
 }
 
-func (ix *Index) Close() error {
-	return ix.data.close()
-}
-
 // slice returns the slice of index data starting at the given byte offset.
 // If n >= 0, the slice must have length at least n and is truncated to length n.
 func (ix *Index) slice(off uint32, n int) []byte {
 	o := int(off)
 	if uint32(o) != off || n >= 0 && o+n > len(ix.data.d) {
-		corrupt()
+		corrupt(ix.data.f)
 	}
 	if n < 0 {
 		return ix.data.d[o:]
@@ -133,11 +129,15 @@ func (ix *Index) uint32(off uint32) uint32 {
 	return binary.BigEndian.Uint32(ix.slice(off, 4))
 }
 
+func (ix *Index) Close() error {
+	return ix.data.close()
+}
+
 // uvarint returns the varint value at the given offset in the index data.
 func (ix *Index) uvarint(off uint32) uint32 {
 	v, n := binary.Uvarint(ix.slice(off, -1))
 	if n <= 0 {
-		corrupt()
+		corrupt(ix.data.f)
 	}
 	return uint32(v)
 }
@@ -167,7 +167,7 @@ func (ix *Index) str(off uint32) []byte {
 	str := ix.slice(off, -1)
 	i := bytes.IndexByte(str, '\x00')
 	if i < 0 {
-		corrupt()
+		corrupt(ix.data.f)
 	}
 	return str[:i]
 }
@@ -250,7 +250,7 @@ func (r *postReader) next() bool {
 		delta64, n := binary.Uvarint(r.d)
 		delta := uint32(delta64)
 		if n <= 0 || delta == 0 {
-			corrupt()
+			corrupt(r.ix.data.f)
 		}
 		r.d = r.d[n:]
 		r.fileid += delta
@@ -268,7 +268,7 @@ func (r *postReader) next() bool {
 	}
 	// list should end with terminating 0 delta
 	if r.d != nil && (len(r.d) == 0 || r.d[0] != 0) {
-		corrupt()
+		corrupt(r.ix.data.f)
 	}
 	r.fileid = ^uint32(0)
 	return false
@@ -411,8 +411,8 @@ func mergeOr(l1, l2 []uint32) []uint32 {
 	return l
 }
 
-func corrupt() {
-	log.Fatal("corrupt index: remove " + File())
+func corrupt(file *os.File) {
+	log.Fatalf("corrupt index: %s", file.Name())
 }
 
 // An mmapData is mmap'ed read-only data from a file.
@@ -423,7 +423,6 @@ type mmapData struct {
 }
 
 func (m *mmapData) close() error {
-	return nil
 	if err := syscall.Munmap(m.o); err != nil {
 		return err
 	}

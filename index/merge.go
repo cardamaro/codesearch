@@ -16,9 +16,9 @@ package index
 // record the mapping from A's docids to C's docids, and also the mapping from
 // B's docids to C's docids.  Both mappings can be summarized in a table like
 //
-//	10-14 map to 20-24
-//	15-24 is deleted
-//	25-34 maps to 40-49
+//  10-14 map to 20-24
+//  15-24 is deleted
+//  25-34 maps to 40-49
 //
 // The number of ranges will be at most the combined number of paths.
 // Also during the merge, write the name index to a temporary file as usual.
@@ -53,8 +53,6 @@ type postIndex struct {
 func Merge(dst, src1, src2 string) {
 	ix1 := Open(src1)
 	ix2 := Open(src2)
-	defer ix1.Close()
-	defer ix2.Close()
 	paths1 := ix1.Paths()
 	paths2 := ix2.Paths()
 
@@ -281,7 +279,7 @@ func (r *postMapReader) nextId() bool {
 		delta64, n := binary.Uvarint(r.d)
 		delta := uint32(delta64)
 		if n <= 0 || delta == 0 {
-			corrupt()
+			corrupt(r.ix.data.f)
 		}
 		r.d = r.d[n:]
 		r.oldid += delta
