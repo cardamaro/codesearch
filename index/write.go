@@ -14,6 +14,7 @@ import (
 	"unsafe"
 
 	"github.com/cardamaro/codesearch/sparse"
+	"github.com/golang/glog"
 )
 
 // Index writing.  See read.go for details of on-disk format.
@@ -143,10 +144,10 @@ func (ix *IndexWriter) Add(name string, f io.Reader) string {
 					if err == io.EOF {
 						break
 					}
-					log.Printf("%s: %v\n", name, err)
+					glog.V(3).Infof("%s: %v\n", name, err)
 					return ""
 				}
-				log.Printf("%s: 0-length read\n", name)
+				glog.V(3).Infof("%s: 0-length read\n", name)
 				return ""
 			}
 			buf = buf[:n]
@@ -161,14 +162,14 @@ func (ix *IndexWriter) Add(name string, f io.Reader) string {
 		if !validUTF8((tv>>8)&0xFF, tv&0xFF) {
 			skipReason = "Invalid UTF-8"
 			if ix.LogSkip {
-				log.Printf("%s: %s\n", name, skipReason)
+				glog.V(3).Infof("%s: %s\n", name, skipReason)
 			}
 			return skipReason
 		}
 		if n > maxFileLen {
 			skipReason = "Too long"
 			if ix.LogSkip {
-				log.Printf("%s: %s\n", name, skipReason)
+				glog.V(3).Infof("%s: %s\n", name, skipReason)
 			}
 			return skipReason
 		}
@@ -187,7 +188,7 @@ func (ix *IndexWriter) Add(name string, f io.Reader) string {
 		if trigramRatio > maxTrigramRatio && ix.trigram.Len() > maxTextTrigrams {
 			skipReason = fmt.Sprintf("Trigram ratio too high (%0.2f), probably not text", trigramRatio)
 			if ix.LogSkip {
-				log.Printf("%s: %s\n", name, skipReason)
+				glog.V(3).Infof("%s: %s\n", name, skipReason)
 			}
 			return skipReason
 		}
@@ -196,7 +197,7 @@ func (ix *IndexWriter) Add(name string, f io.Reader) string {
 		if longLineRatio > maxLongLineRatio {
 			skipReason = fmt.Sprintf("Too many long lines, ratio: %0.2f", longLineRatio)
 			if ix.LogSkip {
-				log.Printf("%s: %s\n", name, skipReason)
+				glog.V(3).Infof("%s: %s\n", name, skipReason)
 			}
 			return skipReason
 		}
@@ -205,7 +206,7 @@ func (ix *IndexWriter) Add(name string, f io.Reader) string {
 	ix.totalBytes += n
 
 	if ix.Verbose {
-		log.Printf("%d %d %s\n", n, ix.trigram.Len(), name)
+		glog.V(3).Infof("%d %d %s\n", n, ix.trigram.Len(), name)
 	}
 
 	fileid := ix.addName(name)
@@ -255,7 +256,7 @@ func (ix *IndexWriter) Flush() {
 	os.Remove(ix.nameIndex.name)
 	os.Remove(ix.postIndex.name)
 
-	log.Printf("%d data bytes, %d index bytes", ix.totalBytes, ix.main.offset())
+	glog.V(3).Infof("%d data bytes, %d index bytes", ix.totalBytes, ix.main.offset())
 
 	ix.main.flush()
 }
@@ -268,7 +269,7 @@ func copyFile(dst, src *bufWriter) {
 	dst.flush()
 	_, err := io.Copy(dst.file, src.finish())
 	if err != nil {
-		log.Fatalf("copying %s to %s: %v", src.name, dst.name, err)
+		glog.Fatalf("copying %s to %s: %v", src.name, dst.name, err)
 	}
 }
 
@@ -276,7 +277,7 @@ func copyFile(dst, src *bufWriter) {
 // It returns the assigned file ID number.
 func (ix *IndexWriter) addName(name string) uint32 {
 	if strings.Contains(name, "\x00") {
-		log.Fatalf("%q: file has NUL byte in name", name)
+		glog.Fatalf("%q: file has NUL byte in name", name)
 	}
 
 	ix.nameIndex.writeUint32(ix.nameData.offset())
@@ -292,10 +293,10 @@ func (ix *IndexWriter) addName(name string) uint32 {
 func (ix *IndexWriter) flushPost() {
 	w, err := ioutil.TempFile("", "csearch-index")
 	if err != nil {
-		log.Fatal(err)
+		glog.Fatal(err)
 	}
 	if ix.Verbose {
-		log.Printf("flush %d entries to %s", len(ix.post), w.Name())
+		glog.V(3).Infof("flush %d entries to %s", len(ix.post), w.Name())
 	}
 	sortPost(ix.post)
 
@@ -304,9 +305,9 @@ func (ix *IndexWriter) flushPost() {
 	data := (*[npost * 8]byte)(unsafe.Pointer(&ix.post[0]))[:len(ix.post)*8]
 	if n, err := w.Write(data); err != nil || n < len(data) {
 		if err != nil {
-			log.Fatal(err)
+			glog.Fatal(err)
 		}
-		log.Fatalf("short write writing %s", w.Name())
+		glog.Fatalf("short write writing %s", w.Name())
 	}
 
 	ix.post = ix.post[:0]
@@ -319,7 +320,7 @@ func (ix *IndexWriter) flushPost() {
 func (ix *IndexWriter) mergePost(out *bufWriter) {
 	var h postHeap
 
-	log.Printf("merge %d files + mem", len(ix.postFile))
+	glog.V(3).Infof("merge %d files + mem", len(ix.postFile))
 	for _, f := range ix.postFile {
 		ix.postData = append(
 			ix.postData,
@@ -508,7 +509,7 @@ func bufCreate(name string) *bufWriter {
 		f, err = ioutil.TempFile("", "csearch")
 	}
 	if err != nil {
-		log.Fatal(err)
+		glog.Fatal(err)
 	}
 	return &bufWriter{
 		name: f.Name(),
@@ -523,7 +524,7 @@ func (b *bufWriter) write(x []byte) {
 		b.flush()
 		if len(x) >= cap(b.buf) {
 			if _, err := b.file.Write(x); err != nil {
-				log.Fatalf("writing %s: %v", b.name, err)
+				glog.Fatalf("writing %s: %v", b.name, err)
 			}
 			return
 		}
@@ -544,7 +545,7 @@ func (b *bufWriter) writeString(s string) {
 		b.flush()
 		if len(s) >= cap(b.buf) {
 			if _, err := b.file.WriteString(s); err != nil {
-				log.Fatalf("writing %s: %v", b.name, err)
+				glog.Fatalf("writing %s: %v", b.name, err)
 			}
 			return
 		}
@@ -557,7 +558,7 @@ func (b *bufWriter) offset() uint32 {
 	off, _ := b.file.Seek(0, 1)
 	off += int64(len(b.buf))
 	if int64(uint32(off)) != off {
-		log.Fatalf("index is larger than 4GB")
+		glog.Fatalf("index is larger than 4GB")
 	}
 	return uint32(off)
 }
@@ -568,7 +569,7 @@ func (b *bufWriter) flush() {
 	}
 	_, err := b.file.Write(b.buf)
 	if err != nil {
-		log.Fatalf("writing %s: %v", b.name, err)
+		glog.Fatalf("writing %s: %v", b.name, err)
 	}
 	b.buf = b.buf[:0]
 }

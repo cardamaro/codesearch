@@ -7,12 +7,12 @@ package main
 import (
 	"flag"
 	"fmt"
-	"log"
 	"os"
 	"runtime/pprof"
 
 	"github.com/cardamaro/codesearch/index"
 	"github.com/cardamaro/codesearch/regexp"
+	"github.com/golang/glog"
 )
 
 var usageMessage = `usage: csearch [-c] [-f fileregexp] [-h] [-i] [-l] [-n] regexp
@@ -73,7 +73,7 @@ func Main() {
 	if *cpuProfile != "" {
 		f, err := os.Create(*cpuProfile)
 		if err != nil {
-			log.Fatal(err)
+			glog.Fatal(err)
 		}
 		defer f.Close()
 		pprof.StartCPUProfile(f)
@@ -86,19 +86,19 @@ func Main() {
 	}
 	re, err := regexp.Compile(pat)
 	if err != nil {
-		log.Fatal(err)
+		glog.Fatal(err)
 	}
 	g.Regexp = re
 	var fre *regexp.Regexp
 	if *fFlag != "" {
 		fre, err = regexp.Compile(*fFlag)
 		if err != nil {
-			log.Fatal(err)
+			glog.Fatal(err)
 		}
 	}
 	q := index.RegexpQuery(re.Syntax)
 	if *verboseFlag {
-		log.Printf("query: %s\n", q)
+		glog.V(3).Infof("query: %s\n", q)
 	}
 
 	ix := index.Open(index.File())
@@ -110,7 +110,7 @@ func Main() {
 		post = ix.PostingQuery(q)
 	}
 	if *verboseFlag {
-		log.Printf("post query identified %d possible files\n", len(post))
+		glog.V(3).Infof("post query identified %d possible files\n", len(post))
 	}
 
 	if fre != nil {
@@ -125,7 +125,7 @@ func Main() {
 		}
 
 		if *verboseFlag {
-			log.Printf("filename regexp matched %d files\n", len(fnames))
+			glog.V(3).Infof("filename regexp matched %d files\n", len(fnames))
 		}
 		post = fnames
 	}

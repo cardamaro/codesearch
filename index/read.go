@@ -67,10 +67,11 @@ package index
 import (
 	"bytes"
 	"encoding/binary"
-	"log"
 	"os"
 	"runtime"
 	"sort"
+
+	"github.com/golang/glog"
 )
 
 const (
@@ -192,7 +193,7 @@ func (ix *Index) dumpPosting() {
 		t := uint32(d[j])<<16 | uint32(d[j+1])<<8 | uint32(d[j+2])
 		count := int(binary.BigEndian.Uint32(d[j+3:]))
 		offset := binary.BigEndian.Uint32(d[j+3+4:])
-		log.Printf("%#x: %d at %d", t, count, offset)
+		glog.V(3).Infof("%#x: %d at %d", t, count, offset)
 	}
 }
 
@@ -411,7 +412,7 @@ func mergeOr(l1, l2 []uint32) []uint32 {
 }
 
 func corrupt(file *os.File) {
-	log.Fatalf("corrupt index: %s", file.Name())
+	glog.Fatalf("corrupt index: %s", file.Name())
 }
 
 // An mmapData is mmap'ed read-only data from a file.
@@ -429,7 +430,7 @@ func (m *mmapData) close() error {
 func mmap(file string) mmapData {
 	f, err := os.Open(file)
 	if err != nil {
-		log.Fatal(err)
+		glog.Fatal(err)
 	}
 	return mmapFile(f)
 }

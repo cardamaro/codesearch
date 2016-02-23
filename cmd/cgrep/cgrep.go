@@ -7,11 +7,11 @@ package main
 import (
 	"flag"
 	"fmt"
-	"log"
 	"os"
 	"runtime/pprof"
 
 	"github.com/cardamaro/codesearch/regexp"
+	"github.com/golang/glog"
 )
 
 var usageMessage = `usage: cgrep [-c] [-h] [-i] [-l] [-n] regexp [file...]
@@ -48,7 +48,7 @@ func main() {
 	if *cpuProfile != "" {
 		f, err := os.Create(*cpuProfile)
 		if err != nil {
-			log.Fatal(err)
+			glog.Fatal(err)
 		}
 		defer f.Close()
 		pprof.StartCPUProfile(f)
@@ -61,7 +61,7 @@ func main() {
 	}
 	re, err := regexp.Compile(pat)
 	if err != nil {
-		log.Fatal(err)
+		glog.Fatal(err)
 	}
 	g.Regexp = re
 	if len(args) == 1 {

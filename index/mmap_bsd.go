@@ -7,19 +7,20 @@
 package index
 
 import (
-	"log"
 	"os"
 	"syscall"
+
+	"github.com/golang/glog"
 )
 
 func mmapFile(f *os.File) mmapData {
 	st, err := f.Stat()
 	if err != nil {
-		log.Fatal(err)
+		glog.Fatal(err)
 	}
 	size := st.Size()
 	if int64(int(size+4095)) != size+4095 {
-		log.Fatalf("%s: too large for mmap", f.Name())
+		glog.Fatalf("%s: too large for mmap", f.Name())
 	}
 	n := int(size)
 	if n == 0 {
@@ -27,7 +28,7 @@ func mmapFile(f *os.File) mmapData {
 	}
 	data, err := syscall.Mmap(int(f.Fd()), 0, (n+4095)&^4095, syscall.PROT_READ, syscall.MAP_PRIVATE)
 	if err != nil {
-		log.Fatalf("mmap %s: %v", f.Name(), err)
+		glog.Fatalf("mmap %s: %v", f.Name(), err)
 	}
 	return mmapData{f, data[:n], data}
 }

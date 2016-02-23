@@ -5,33 +5,34 @@
 package index
 
 import (
-	"log"
 	"os"
 	"syscall"
 	"unsafe"
+
+	"github.com/golang/glog"
 )
 
 func mmapFile(f *os.File) mmapData {
 	st, err := f.Stat()
 	if err != nil {
-		log.Fatal(err)
+		glog.Fatal(err)
 	}
 	size := st.Size()
 	if int64(int(size+4095)) != size+4095 {
-		log.Fatalf("%s: too large for mmap", f.Name())
+		glog.Fatalf("%s: too large for mmap", f.Name())
 	}
 	if size == 0 {
 		return mmapData{f, nil, nil}
 	}
 	h, err := syscall.CreateFileMapping(syscall.Handle(f.Fd()), nil, syscall.PAGE_READONLY, uint32(size>>32), uint32(size), nil)
 	if err != nil {
-		log.Fatalf("CreateFileMapping %s: %v", f.Name(), err)
+		glog.Fatalf("CreateFileMapping %s: %v", f.Name(), err)
 	}
 	defer syscall.CloseHandle(syscall.Handle(h))
 
 	addr, err := syscall.MapViewOfFile(h, syscall.FILE_MAP_READ, 0, 0, 0)
 	if err != nil {
-		log.Fatalf("MapViewOfFile %s: %v", f.Name(), err)
+		glog.Fatalf("MapViewOfFile %s: %v", f.Name(), err)
 	}
 
 	data := (*[1 << 30]byte)(unsafe.Pointer(addr))

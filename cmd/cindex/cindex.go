@@ -7,13 +7,13 @@ package main
 import (
 	"flag"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"runtime/pprof"
 	"sort"
 
 	"github.com/cardamaro/codesearch/index"
+	"github.com/golang/glog"
 )
 
 var usageMessage = `usage: cindex [-list] [-reset] [path...]
@@ -76,7 +76,7 @@ func main() {
 	if *cpuProfile != "" {
 		f, err := os.Create(*cpuProfile)
 		if err != nil {
-			log.Fatal(err)
+			glog.Fatal(err)
 		}
 		defer f.Close()
 		pprof.StartCPUProfile(f)
@@ -99,7 +99,7 @@ func main() {
 	for i, arg := range args {
 		a, err := filepath.Abs(arg)
 		if err != nil {
-			log.Printf("%s: %s", arg, err)
+			glog.V(3).Infof("%s: %s", arg, err)
 			args[i] = ""
 			continue
 		}
@@ -125,7 +125,7 @@ func main() {
 	ix.Verbose = *verboseFlag
 	ix.AddPaths(args)
 	for _, arg := range args {
-		log.Printf("index %s", arg)
+		glog.V(3).Infof("index %s", arg)
 		filepath.Walk(arg, func(path string, info os.FileInfo, err error) error {
 			if _, elem := filepath.Split(path); elem != "" {
 				// Skip various temporary or "hidden" files or directories.
@@ -137,7 +137,7 @@ func main() {
 				}
 			}
 			if err != nil {
-				log.Printf("%s: %s", path, err)
+				glog.V(3).Infof("%s: %s", path, err)
 				return nil
 			}
 			if info != nil && info.Mode()&os.ModeType == 0 {
@@ -146,15 +146,15 @@ func main() {
 			return nil
 		})
 	}
-	log.Printf("flush index")
+	glog.V(3).Infof("flush index")
 	ix.Flush()
 
 	if !*resetFlag {
-		log.Printf("merge %s %s", master, file)
+		glog.V(3).Infof("merge %s %s", master, file)
 		index.Merge(file+"~", master, file)
 		os.Remove(file)
 		os.Rename(file+"~", master)
 	}
-	log.Printf("done")
+	glog.V(3).Infof("done")
 	return
 }
