@@ -5,15 +5,15 @@
 package index
 
 import (
+	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
 	"os"
 	"strings"
-	"syscall"
 	"unsafe"
 
-	"github.com/cardamaro/codesearch/sparse"
+	"github.com/etsy/hound/codesearch/sparse"
 )
 
 // Index writing.  See read.go for details of on-disk format.
@@ -57,7 +57,7 @@ type IndexWriter struct {
 	main  *bufWriter // main index file
 }
 
-const npost = 1 << 20 // 1 MB worth of post entries
+const npost = 64 << 20 / 8 // 64 MB worth of post entries
 
 // Create returns a new IndexWriter that will write the index to file.
 func Create(file string) *IndexWriter {
@@ -90,12 +90,15 @@ func makePostEntry(trigram, fileid uint32) postEntry {
 // Tuning constants for detecting text files.
 // A file is assumed not to be text files (and thus not indexed)
 // if it contains an invalid UTF-8 sequences, if it is longer than maxFileLength
-// bytes, if it contains a line longer than maxLineLen bytes,
-// or if it contains more than maxTextTrigrams distinct trigrams.
+// bytes, if it contains more than maxLongLineRatio lines longer than maxLineLen bytes,
+// or if it contains more than maxTextTrigrams distinct trigrams AND
+// it has a ratio of trigrams to filesize > maxTrigramRatio.
 const (
-	maxFileLen      = 1 << 30
-	maxLineLen      = 2000
-	maxTextTrigrams = 20000
+	maxFileLen       = 1 << 25
+	maxLineLen       = 2000
+	maxLongLineRatio = 0.1
+	maxTextTrigrams  = 20000
+	maxTrigramRatio  = 0.1
 )
 
 // AddPaths adds the given paths to the index's list of paths.
@@ -117,16 +120,20 @@ func (ix *IndexWriter) AddFile(name string) {
 
 // Add adds the file f to the index under the given name.
 // It logs errors using package log.
-func (ix *IndexWriter) Add(name string, f io.Reader) {
+func (ix *IndexWriter) Add(name string, f io.Reader) string {
 	ix.trigram.Reset()
 	var (
-		c       = byte(0)
-		i       = 0
-		buf     = ix.inbuf[:0]
-		tv      = uint32(0)
-		n       = int64(0)
-		linelen = 0
+		c          = byte(0)
+		i          = 0
+		buf        = ix.inbuf[:0]
+		tv         = uint32(0)
+		n          = int64(0)
+		linelen    = 0
+		numLines   = 0
+		longLines  = 0
+		skipReason = ""
 	)
+
 	for {
 		tv = (tv << 8) & (1<<24 - 1)
 		if i >= len(buf) {
@@ -137,10 +144,10 @@ func (ix *IndexWriter) Add(name string, f io.Reader) {
 						break
 					}
 					log.Printf("%s: %v\n", name, err)
-					return
+					return ""
 				}
 				log.Printf("%s: 0-length read\n", name)
-				return
+				return ""
 			}
 			buf = buf[:n]
 			i = 0
@@ -152,33 +159,49 @@ func (ix *IndexWriter) Add(name string, f io.Reader) {
 			ix.trigram.Add(tv)
 		}
 		if !validUTF8((tv>>8)&0xFF, tv&0xFF) {
+			skipReason = "Invalid UTF-8"
 			if ix.LogSkip {
-				log.Printf("%s: invalid UTF-8, ignoring\n", name)
+				log.Printf("%s: %s\n", name, skipReason)
 			}
-			return
+			return skipReason
 		}
 		if n > maxFileLen {
+			skipReason = "Too long"
 			if ix.LogSkip {
-				log.Printf("%s: too long, ignoring\n", name)
+				log.Printf("%s: %s\n", name, skipReason)
 			}
-			return
+			return skipReason
 		}
-		if linelen++; linelen > maxLineLen {
-			if ix.LogSkip {
-				log.Printf("%s: very long lines, ignoring\n", name)
-			}
-			return
-		}
+		linelen++
 		if c == '\n' {
+			numLines++
+			if linelen > maxLineLen {
+				longLines++
+			}
 			linelen = 0
 		}
 	}
-	if ix.trigram.Len() > maxTextTrigrams {
-		if ix.LogSkip {
-			log.Printf("%s: too many trigrams, probably not text, ignoring\n", name)
+
+	if n > 0 {
+		trigramRatio := float32(ix.trigram.Len()) / float32(n)
+		if trigramRatio > maxTrigramRatio && ix.trigram.Len() > maxTextTrigrams {
+			skipReason = fmt.Sprintf("Trigram ratio too high (%0.2f), probably not text", trigramRatio)
+			if ix.LogSkip {
+				log.Printf("%s: %s\n", name, skipReason)
+			}
+			return skipReason
 		}
-		return
+
+		longLineRatio := float32(longLines) / float32(numLines)
+		if longLineRatio > maxLongLineRatio {
+			skipReason = fmt.Sprintf("Too many long lines, ratio: %0.2f", longLineRatio)
+			if ix.LogSkip {
+				log.Printf("%s: %s\n", name, skipReason)
+			}
+			return skipReason
+		}
 	}
+
 	ix.totalBytes += n
 
 	if ix.Verbose {
@@ -192,6 +215,8 @@ func (ix *IndexWriter) Add(name string, f io.Reader) {
 		}
 		ix.post = append(ix.post, makePostEntry(trigram, fileid))
 	}
+
+	return ""
 }
 
 // Flush flushes the index entry to the target file.
@@ -221,7 +246,7 @@ func (ix *IndexWriter) Flush() {
 
 	os.Remove(ix.nameData.name)
 	for _, d := range ix.postData {
-		syscall.Munmap(d)
+		unmmap(d)
 	}
 	for _, f := range ix.postFile {
 		f.Close()
@@ -233,6 +258,10 @@ func (ix *IndexWriter) Flush() {
 	log.Printf("%d data bytes, %d index bytes", ix.totalBytes, ix.main.offset())
 
 	ix.main.flush()
+}
+
+func (ix *IndexWriter) Close() {
+	ix.main.file.Close()
 }
 
 func copyFile(dst, src *bufWriter) {
